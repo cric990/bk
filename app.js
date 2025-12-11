@@ -1,4 +1,4 @@
-// --- CONFIG (PASTE YOUR KEYS HERE) ---
+// CONFIG (Paste Your Keys)
 const firebaseConfig = {
   apiKey: "AIzaSyA2iHrUt8_xxvB2m8-LftaE9sg_5JaiFk8",
   authDomain: "banty-live.firebaseapp.com",
@@ -11,162 +11,56 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
-// --- 1. SEARCH LOGIC (FIXED) ---
-function toggleSearch() {
-    const s = document.getElementById('search-ui');
-    s.classList.toggle('active');
-    if(s.classList.contains('active')) {
-        document.getElementById('search-inp').value = "";
-        document.getElementById('search-inp').focus();
-        // Reset grid
-        renderGrid(allData); 
-    } else {
-        renderGrid(allData); // Reset on close
-    }
-}
-
-document.getElementById('search-inp').addEventListener('input', (e) => {
-    const val = e.target.value.toLowerCase();
-    const filtered = allData.filter(d => d.title.toLowerCase().includes(val));
-    renderGrid(filtered);
-});
-
-// --- 2. THEME ENGINE ---
-function toggleTheme() {
-    const b = document.body;
-    const icon = document.getElementById('theme-icon');
-    if(b.getAttribute('data-theme') === 'light') {
-        b.removeAttribute('data-theme');
-        icon.classList.remove('fa-sun'); icon.classList.add('fa-moon');
-        localStorage.setItem('theme', 'dark');
-    } else {
-        b.setAttribute('data-theme', 'light');
-        icon.classList.remove('fa-moon'); icon.classList.add('fa-sun');
-        localStorage.setItem('theme', 'light');
-    }
-}
-if(localStorage.getItem('theme') === 'light') toggleTheme();
-
-// --- 3. WHATSAPP TOAST (25 MIN LOOP) ---
-const waSound = new Audio("https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3");
-let userActive = false;
-document.body.addEventListener('click', ()=>userActive=true, {once:true});
-
-function showWa() {
-    const t = document.getElementById('wa-popup');
-    t.classList.add('show');
-    if(userActive) waSound.play().catch(()=>{});
-    setTimeout(() => t.classList.remove('show'), 5000);
-}
-setInterval(showWa, 1500000); // 25 Min
-setTimeout(showWa, 8000);     // 8 Sec
-
-// --- 4. DATA LOGIC ---
-let allData = [];
-let currentCat = 'All';
-
-// Cats
-db.collection("categories").onSnapshot(s => {
-    const t = document.getElementById('cat-tabs');
-    t.innerHTML = `<div class="tab-pill active" onclick="filterCat('All', this)">All Events</div>`;
-    s.forEach(d => {
-        const n = d.data().name;
-        t.innerHTML += `<div class="tab-pill" onclick="filterCat('${n}', this)">${n}</div>`;
-    });
-});
-
-function filterCat(c, btn) {
-    currentCat = c;
-    document.querySelectorAll('.tab-pill').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    
-    if(c === 'All') {
-        renderGrid(allData);
-    } else {
-        const f = allData.filter(x => x.category === c);
-        renderGrid(f);
-    }
-}
-
-// Matches
-db.collection("matches").orderBy("time", "desc").onSnapshot(s => {
-    allData = [];
-    s.forEach(d => allData.push(doc = d.data()));
-    // If search is active, don't override search results instantly
-    if(!document.getElementById('search-ui').classList.contains('active')) {
-        renderGrid(allData);
+// --- 1. PLAYER ENGINE (FIXED) ---
+var player = videojs('v-player', {
+    fluid: true,
+    html5: {
+        vhs: { 
+            overrideNative: true, // Forces HLS.js on Chrome
+            withCredentials: false 
+        },
+        nativeAudioTracks: false,
+        nativeVideoTracks: false
     }
 });
 
-function renderGrid(data) {
-    const g = document.getElementById('match-grid');
-    g.innerHTML = "";
-    
-    if(data.length === 0) { g.innerHTML = '<p style="padding:20px; color:var(--text-sec);">No matches found.</p>'; return; }
-
-    data.forEach(d => {
-        const div = document.createElement('div');
-        div.className = 'card';
-        div.onclick = () => openPlayer(d);
-        div.innerHTML = `
-            <div class="poster-box">
-                <img src="${d.poster}" class="poster-img" onerror="this.src='https://via.placeholder.com/300x160'">
-            </div>
-            <div class="card-info">
-                <div class="card-title">${d.title}</div>
-                <div class="card-ft">
-                    <div class="live-tag"><div class="live-icon"></div> LIVE</div>
-                    <div>${d.streams ? d.streams.length : 1} Source</div>
-                </div>
-            </div>
-        `;
-        g.appendChild(div);
-    });
-}
-
-// Slider
-const slider = document.getElementById('slider');
-db.collection("slider").orderBy("time", "desc").onSnapshot(s => {
-    slider.innerHTML = "";
-    s.forEach(d => {
-        const div = document.createElement('div');
-        div.className = 'slide';
-        div.style.backgroundImage = `url('${d.img}')`;
-        if(d.link) div.onclick = () => openPlayer({title:d.title, streams:[{lbl:'HD', url:d.link}]});
-        div.innerHTML = `
-            <div class="slide-gradient">
-                <span class="slide-badge">FEATURED</span>
-                <div class="slide-title">${d.title}</div>
-            </div>`;
-        slider.appendChild(div);
-    });
+// Error Handling
+player.on('error', function() {
+    const err = player.error();
+    console.log("Player Error:", err);
+    document.getElementById('player-error').style.display = 'flex';
 });
 
-// --- 5. PLAYER ---
-var player = videojs('v-player', { fluid: true, html5: { hls: { overrideNative: true } } });
+// --- 2. OPEN PLAYER LOGIC ---
 let viewInt;
 
 function openPlayer(d) {
     document.getElementById('player-ui').classList.add('active');
     document.getElementById('p-title').innerText = d.title;
+    document.getElementById('player-error').style.display = 'none'; // Hide prev errors
     
     const qBox = document.getElementById('q-btns');
     qBox.innerHTML = "";
+
     if(d.streams && d.streams.length > 0) {
-        playLink(d.streams[0].url);
+        // Auto Play First Stream
+        playSource(d.streams[0]);
+
+        // Create Buttons
         d.streams.forEach((s, i) => {
             let b = document.createElement('div');
-            b.className = i===0 ? 'q-btn active' : 'q-btn';
+            b.className = i===0 ? 'btn-q active' : 'btn-q';
             b.innerText = s.lbl;
             b.onclick = () => {
-                document.querySelectorAll('.q-btn').forEach(x=>x.classList.remove('active'));
+                document.querySelectorAll('.btn-q').forEach(x=>x.classList.remove('active'));
                 b.classList.add('active');
-                playLink(s.url);
+                playSource(s);
             }
             qBox.appendChild(b);
         });
     }
 
+    // Fake Views
     clearInterval(viewInt);
     const min = parseInt(d.minViews) || 1000;
     const max = parseInt(d.maxViews) || 2000;
@@ -174,52 +68,109 @@ function openPlayer(d) {
     viewInt = setInterval(() => updateView(min, max), 3000);
 }
 
-function updateView(min, max) {
-    const v = Math.floor(Math.random() * (max - min + 1) + min);
-    document.getElementById('v-count').innerText = v.toLocaleString();
+// --- 3. SOURCE SWITCHING (M3U8 vs EMBED) ---
+function playSource(s) {
+    const vjsTech = document.querySelector('.video-js');
+    const iframe = document.getElementById('web-player');
+    const errBox = document.getElementById('player-error');
+
+    // Reset UI
+    errBox.style.display = 'none';
+    player.pause();
+    iframe.src = "";
+
+    if (s.type === 'embed') {
+        // Handle Iframe
+        vjsTech.style.display = 'none';
+        iframe.style.display = 'block';
+        iframe.src = s.url;
+    } else {
+        // Handle M3U8
+        iframe.style.display = 'none';
+        vjsTech.style.display = 'block';
+        
+        // HTTP Check warning (Only for Vercel/Https sites)
+        if (window.location.protocol === 'https:' && s.url.startsWith('http://')) {
+            alert("Warning: You are trying to play an HTTP (Insecure) link on an HTTPS site. This might fail.");
+        }
+
+        player.src({
+            src: s.url,
+            type: 'application/x-mpegURL' // Strict Mime Type
+        });
+        player.play().catch(e => console.log("Auto-play prevented by browser"));
+    }
 }
 
-function playLink(url) {
-    player.src({ src: url, type: 'application/x-mpegURL' });
-    player.play().catch(()=>{});
+function updateView(min, max) {
+    const v = Math.floor(Math.random() * (max - min + 1) + min);
+    document.getElementById('view-cnt').innerText = v.toLocaleString();
 }
 
 function closePlayer() {
     player.pause();
+    document.getElementById('web-player').src = "";
     document.getElementById('player-ui').classList.remove('active');
     clearInterval(viewInt);
 }
 
-// --- 6. NOTIFICATIONS (1 Hour) ---
-function toggleNotif() {
-    document.getElementById('n-box').classList.toggle('active');
-    document.getElementById('n-badge').style.display = 'none';
+// --- 4. REST OF THE APP LOGIC (Search, Grid, Slider etc.) ---
+// ... (Purana code jo sahi chal raha tha wo niche rakhen) ...
+
+// SEARCH
+function toggleSearch() {
+    const s = document.getElementById('search-ui');
+    s.classList.toggle('active');
+    if(s.classList.contains('active')) document.getElementById('search-inp').focus();
+    else renderGrid(allData);
+}
+document.getElementById('search-inp').addEventListener('input', (e) => {
+    const val = e.target.value.toLowerCase();
+    const filtered = allData.filter(d => d.title.toLowerCase().includes(val));
+    renderGrid(filtered);
+});
+
+// DATA FETCH
+let allData = [];
+let curCat = 'All';
+
+db.collection("categories").onSnapshot(s => {
+    const t = document.getElementById('cat-tabs');
+    t.innerHTML = `<div class="tab active" onclick="filter('All', this)">All Events</div>`;
+    s.forEach(d => t.innerHTML += `<div class="tab" onclick="filter('${d.data().name}', this)">${d.data().name}</div>`);
+});
+
+function filter(c, btn) {
+    curCat = c;
+    document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    renderGrid(c === 'All' ? allData : allData.filter(d => d.category === c));
 }
 
-db.collection("notifications").orderBy("time", "desc").onSnapshot(s => {
-    const list = document.getElementById('n-list');
-    list.innerHTML = "";
-    let count = 0;
-    const now = Date.now();
-    const limit = 3600000; // 1 Hour
-
-    s.forEach(d => {
-        const data = d.data();
-        if(now - data.time < limit) {
-            count++;
-            const min = Math.floor((now - data.time)/60000);
-            list.innerHTML += `
-                <div class="nb-item">
-                    <div class="nb-title">${data.title}</div>
-                    <div class="nb-msg">${data.msg}</div>
-                    <div style="font-size:10px; color:#666; margin-top:3px;">${min}m ago</div>
-                </div>`;
-        }
-    });
-
-    if(count === 0) list.innerHTML = '<div style="padding:15px; text-align:center; color:gray; font-size:11px;">No alerts</div>';
-    if(count > 0) {
-        const b = document.getElementById('n-badge');
-        b.style.display = 'block';
-    }
+db.collection("matches").orderBy("time", "desc").onSnapshot(s => {
+    allData = [];
+    s.forEach(doc => allData.push(doc.data()));
+    if(!document.getElementById('search-ui').classList.contains('active')) renderGrid(allData);
 });
+
+function renderGrid(data) {
+    const g = document.getElementById('grid');
+    g.innerHTML = "";
+    if(data.length === 0) { g.innerHTML = '<p style="padding:20px;color:gray;text-align:center;">No matches found.</p>'; return; }
+    
+    data.forEach(d => {
+        const div = document.createElement('div');
+        div.className = 'card';
+        div.onclick = () => openPlayer(d);
+        div.innerHTML = `
+            <img src="${d.poster}" class="poster" onerror="this.src='https://via.placeholder.com/300x160'">
+            <div class="c-content">
+                <div class="c-title">${d.title}</div>
+                <div class="c-ft"><span class="live-txt">● LIVE</span><span>${d.streams?d.streams.length:1} Src</span></div>
+            </div>`;
+        g.appendChild(div);
+    });
+}
+
+// Slider & Notif Logic (Same as before)
+// ... Copy from previous App.js for Slider/Notif ...
